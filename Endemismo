@@ -1,1 +1,289 @@
+# Indice de Endemismo compuesto
+# Tomado de "Fungal_Endemicity_and_Vulnerability (https://github.com/Mycology-Microbiology-Center/Fungal_Endemicity_and_Vulnerability)" editado por Daniela Sanchez 2024
 
+setwd(".../YUCATAN/OTU")
+
+#Estructura de las carpetas
+#YUCATAN
+#  |              |---input (shp)
+#  |------- OTU---|
+#  |              |---- (otu_table)
+#  |--------out
+
+
+#paquetes
+
+library(viridis)
+library(geosphere)
+library(tidyverse)
+library(sf)
+library(readxl)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(betapart)
+library(writexl)
+
+
+####################### 
+# Maxima distancia geografica entre OTUs
+#######################
+
+otu_table<-read_excel(".../YUCATAN/OTU/otu_table_77.xlsx")
+
+# maxima distancia geografica
+
+mult <- table(otu_table$otu)
+
+# obtener los OTUs con mas de una aparicion
+
+mult <- names(mult[mult > 1])
+
+dat <- otu_table %>%
+  select(otu, geo_Y, geo_X) %>%
+  filter(otu %in% mult) %>%
+  group_by(otu) %>%
+  group_split()
+
+get_max <- function(x){
+  sub <- max(distm(x[,c("geo_X", "geo_Y")]))
+  sub_out <- tibble(otu = unique(x$otu),
+                    max_distance = sub)
+  return(sub_out)
+}
+
+out <- purrr::map(dat, get_max)
+max_dist <- bind_rows(out)
+
+# guardar maxima distancia geografica
+
+save(max_dist, file = ".../YUCATAN/OTU/output/OTU_maximum_distance_77.rda")
+
+# Graficar la maxima distancia geografica
+#######################
+
+ggplot()+
+  geom_histogram(data = max_dist, aes(max_distance/1000), bins = 50)+
+  ylab("Number of OTUs")+
+  xlab("Maximum distance among occurrences [km]")+
+  theme_bw()
+
+ggsave(file = ".../YUCATAN/output/04_plot_histogramm_max_OTU_distance.pdf")
+
+####################### 
+# Extracción de OTUs endemicos
+#######################
+
+# something is odd with the labels here, trying to fix
+
+dat <- otu_table %>%
+  # only retain one instance per OTU per ecoregion
+  distinct(otu, ecoregion, .keep_all = TRUE) %>%
+  mutate(value = 1)
+
+# extraer OTUs que solo aparecen en un sitio "endemicos"
+
+list_endemic_OTUS <-
+  dat %>%
+  select(otu, ecoregion) %>%
+  mutate(value = 1) %>%
+  group_by(otu) %>%
+  summarize(endemic_to_single_region = sum(value)) %>%
+  filter(endemic_to_single_region == 1)
+
+save(list_endemic_OTUS, file = ".../YUCATAN/List_endemic_OTUs_77.txt")
+
+# separar los OTUs endemicos por primary lifestyle
+
+dat<- dat %>%
+  mutate(endemic_to_single_region = ifelse(otu %in% list_endemic_OTUS$otu, 1, 0))
+
+out <- dat %>%
+  group_by(ecoregion) %>%
+  summarize(n_OTU = sum(value),
+            n_ectomyc = sum(ectomycorrhizal),
+            n_arbuscmyc = sum(arbuscular_mycorrhizal),
+            n_smold = sum(sooty_mold),
+            n_anparasite = sum(animal_parasite),
+            n_unsapro = sum(unspecified_saprotroph),
+            n_planpatho = sum(plant_pathogen),
+            n_soilsapro = sum(soil_saprotroph),
+            n_litsapro = sum(litter_saprotroph),
+            n_woodsapro = sum(wood_saprotroph),
+            n_unknown = sum(unknown_primary_lifestyle),
+            n_dunsapro = sum(dung_saprotroph),
+            n_mycparasite = sum(mycoparasite),
+            n_unpatho = sum(unspecified_pathotroph),
+            n_lichen = sum(lichenized),
+            
+            n_endemic_OTU = sum(endemic_to_single_region[endemic_to_single_region == 1]),
+            n_endemic_ectomyc = sum(ectomycorrhizal[endemic_to_single_region == 1]),
+            n_endemic_ectomyc = sum(ectomycorrhizal[endemic_to_single_region == 1]),
+            n_endemic_arbuscmyc = sum(arbuscular_mycorrhizal[endemic_to_single_region == 1]),
+            n_endemic_smold = sum(sooty_mold[endemic_to_single_region == 1]),
+            n_endemic_anparasite = sum(animal_parasite[endemic_to_single_region == 1]),
+            n_endemic_unsapro = sum(unspecified_saprotroph[endemic_to_single_region == 1]),
+            n_endemic_planpatho = sum(plant_pathogen[endemic_to_single_region == 1]),
+            n_endemic_unpatho = sum(unspecified_pathotroph[endemic_to_single_region == 1]),
+            n_endemic_mycoparasite = sum(mycoparasite[endemic_to_single_region == 1]),
+            n_endemic_dunsapro = sum(dung_saprotroph[endemic_to_single_region == 1]),
+            n_endemic_unknown = sum(unknown_primary_lifestyle[endemic_to_single_region == 1]),
+            n_endemic_woodsapro = sum(wood_saprotroph[endemic_to_single_region == 1]),
+            n_endemic_litsapro = sum(litter_saprotroph[endemic_to_single_region == 1]),
+            n_endemic_soilsapro = sum(soil_saprotroph[endemic_to_single_region == 1]),
+            n_endemic_lichen = sum(lichenized[endemic_to_single_region == 1])) %>%
+  
+  mutate(prop_endemic = n_endemic_OTU / n_OTU * 100)
+
+save(out, file = ".../YUCATAN/endemics_by_primary_lifestyle_77.txt")
+
+
+# Indice calibrado de Crisp
+#######################
+
+# en este archivo se modifico la distancia 0 de los OTUs con solo una aparicion por el area de distribucion minima esperada (1km)
+
+#max_dist<-read.csv("C:/Users/micorrizas/Desktop/Cosos_daniela/Tedersoo/YUCATAN/OTU/output/all_dist.csv")
+
+# indice calibrado de endemismo de crisp (para especies con mas de una aparicion)
+
+crisp <- dat %>%
+  select(otu, ecoregion) %>%
+  distinct() %>%
+  right_join(max_dist) %>%
+  group_by(ecoregion) %>%
+  summarize(crisp_mean_max_dist = mean(max_distance),
+            crisp_median_max_dist = median(max_distance))
+
+
+#save(crisp, file = ".../YUCATAN/Crisp_distance_77.txt")
+
+out <- out %>%
+  left_join(crisp)
+
+save(out, file = ".../YUCATAN/Crisp_distance_applayed_77.txt")
+
+
+#Indice de Jaccard y beta Simpson
+#######################
+
+# generacion matriz
+
+baselga <- dat %>%
+  select(otu, ecoregion) %>%
+  distinct() %>%
+  mutate(value = 1) %>%
+  pivot_wider(names_from = ecoregion, values_from = value)
+
+baselga[is.na(baselga)] <- 0
+nams <- baselga$otu
+baselga <- baselga[,-1]
+baselga <- data.frame(t(baselga))
+names(baselga) <- nams
+
+write.csv(baselga, file = ".../YUCATAN/OTU/output/region_by_OTU_matrix_baselga_ecoregions.csv")
+
+##########################################################################
+
+# indice de Jaccard pareado
+
+beta <- beta.pair(x = baselga, index.family = "jaccard")
+
+#jaccard total
+jac <- as.matrix(beta$beta.jac)
+diag(jac) <- NA
+
+jac <- rowMeans(jac, na.rm = TRUE)
+jac <-data.frame(jac)
+
+jac$ecoregion <- rownames(jac)
+names(jac) <- c("jac", "ecoregion")
+
+#jaccard turnover
+
+jtu <- as.matrix(beta$beta.jtu)
+diag(jtu) <- NA
+
+jtu <- rowMeans(jtu, na.rm = TRUE)
+jtu <- data.frame(jtu)
+
+jtu$ecoregion <- rownames(jtu)
+names(jtu) <- c("jtu", "ecoregion")
+
+jaccard <- jac %>%
+  left_join(jtu)
+
+# indice de Simpson pareado
+
+beta <- beta.pair(x = baselga, index.family = "sorensen")
+
+sim <- as.matrix(beta$beta.sim)
+diag(sim) <- NA
+
+sim <- rowMeans(sim, na.rm = TRUE)
+sim <- data.frame(sim)
+
+sim$sample_id <- rownames(sim) ####
+names(sim) <- c("sim", "sample_id") ####
+
+jaccard <- left_join(jaccard, sim, by=c("sample_id"))
+
+###################
+
+diversity <- out %>%
+  left_join(jaccard)
+
+# indice de Simpson multiple
+###########################
+
+# cargar la tabla de otus de cada ecoregion
+
+otu_table<-read_excel("C:/Users/micorrizas/Desktop/Cosos_daniela/Tedersoo/YUCATAN/OTU/otu_table_ecoregion/Mesoamerican_gulf_caribbean_mangroves.xlsx")
+
+#Chiapas_montane_forests
+#Meseta_central_matorral
+#Mesoamerican_gulf_caribbean_mangroves
+#Oaxacan_montane_forests
+#Pacific_dry_forests
+#Pantanos_de_Centla
+#Peten_veracruz_moist_forests
+#Sierra_Madre_Occidental
+#Sierra_de_los_tuxtlas
+#Sierra_madre_de_oaxaca_pine_oak_forests
+#Sierra_madre_oriental_pine_oak_forests
+#Trans_mexican_volcanic_belt
+#Veracruz_montane_forests
+#Yucatan_dry_forests
+#Yucatan_moist_forests
+
+dat <- otu_table %>%
+  distinct(otu, sample_id, .keep_all = TRUE) %>% #site
+  mutate(value = 1)
+
+# calcular matriz para cada ecoregion 
+
+baselga <- dat %>%
+  select(otu, sample_id) %>% #
+  distinct() %>%
+  mutate(value = 1) %>%
+  pivot_wider(names_from = sample_id, #
+              values_from = value)
+
+baselga[is.na(baselga)] <- 0
+nams <- baselga$otu
+baselga <- baselga[,-1]
+baselga <- data.frame(t(baselga))
+names(baselga) <- nams
+
+# Cargar la funcion beta.SIM para multiples sitios
+
+setwd("C:/Users/micorrizas/Desktop/Cosos_daniela/Simpson")
+source("beta-multi.R")
+
+results<-beta.SIM(baselga)
+
+diversity <- out %>%
+  left_join(results)
+
+######################################
+
+#save(diversity, file = "output/diversity_metrics_per_ecoregion.rda")
